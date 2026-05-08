@@ -1,0 +1,382 @@
+const RESULT_PENDING = "-";
+const RESULT_MATCH = "○";
+const RESULT_MISMATCH = "✖";
+const STATUS_WAITING = "照合待ち";
+const STATUS_REGISTERED = "マスターデータ登録済み";
+const STATUS_MATCH = "照合成功";
+const STATUS_MISMATCH = "照合失敗";
+const DEFAULT_LOG_FILE_NAME = "PPY000000";
+const STORAGE_KEY = "ppy-web-state";
+
+const state = {
+  screen: "verification",
+  selectedMode: null,
+  masterInput: "",
+  masterData: "",
+  slaveData: "",
+  resultSymbol: RESULT_PENDING,
+  resultMessage: STATUS_WAITING,
+  matchCount: 0,
+  masterStartPosition: "1",
+  slaveStartPosition: "1",
+  comparisonDigits: "0",
+  logFileNameSetting: DEFAULT_LOG_FILE_NAME,
+  logs: []
+};
+
+const elements = {
+  verificationScreen: document.querySelector("#verification-screen"),
+  settingsScreen: document.querySelector("#settings-screen"),
+  modeButtons: document.querySelectorAll(".mode-button"),
+  modeMessage: document.querySelector("#mode-message"),
+  logMessage: document.querySelector("#log-message"),
+  matchCount: document.querySelector("#match-count"),
+  settingsMatchCount: document.querySelector("#settings-match-count"),
+  resultSymbol: document.querySelector("#result-symbol"),
+  openSettings: document.querySelector("#open-settings"),
+  backButton: document.querySelector("#back-button"),
+  masterInput: document.querySelector("#master-input"),
+  slaveInput: document.querySelector("#slave-input"),
+  clearButton: document.querySelector("#clear-button"),
+  retryButton: document.querySelector("#retry-button"),
+  masterStart: document.querySelector("#master-start"),
+  slaveStart: document.querySelector("#slave-start"),
+  comparisonDigits: document.querySelector("#comparison-digits"),
+  logFileName: document.querySelector("#log-file-name"),
+  clearCountButton: document.querySelector("#clear-count-button"),
+  downloadLogButton: document.querySelector("#download-log-button"),
+  deleteLogButton: document.querySelector("#delete-log-button"),
+  dialog: document.querySelector("#confirm-dialog"),
+  dialogMessage: document.querySelector("#dialog-message"),
+  dialogOk: document.querySelector("#dialog-ok")
+};
+
+function loadState() {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (!stored) return;
+
+  try {
+    const parsed = JSON.parse(stored);
+    Object.assign(state, {
+      matchCount: Number(parsed.matchCount) || 0,
+      masterStartPosition: parsed.masterStartPosition || "1",
+      slaveStartPosition: parsed.slaveStartPosition || "1",
+      comparisonDigits: parsed.comparisonDigits || "0",
+      logFileNameSetting: parsed.logFileNameSetting || DEFAULT_LOG_FILE_NAME,
+      logs: Array.isArray(parsed.logs) ? parsed.logs : []
+    });
+  } catch {
+    localStorage.removeItem(STORAGE_KEY);
+  }
+}
+
+function saveState() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    matchCount: state.matchCount,
+    masterStartPosition: state.masterStartPosition,
+    slaveStartPosition: state.slaveStartPosition,
+    comparisonDigits: state.comparisonDigits,
+    logFileNameSetting: state.logFileNameSetting,
+    logs: state.logs
+  }));
+}
+
+function sanitizeScanInput(value) {
+  return value.replace(/\r/g, "").replace(/\n/g, "");
+}
+
+function hasScanTerminator(value) {
+  return value.includes("\n") || value.includes("\r");
+}
+
+function digitsOnly(value) {
+  return value.replace(/\D/g, "");
+}
+
+function extractComparableSegment(value, startPositionText, digitsText) {
+  const startIndex = Math.max((Number.parseInt(startPositionText, 10) || 1), 1) - 1;
+  if (startIndex >= value.length) return "";
+
+  const digits = Number.parseInt(digitsText, 10) || 0;
+  return digits <= 0 ? value.slice(startIndex) : value.slice(startIndex, startIndex + digits);
+}
+
+function buildVerificationLogLine(masterData, slaveData, resultSymbol) {
+  const now = new Date();
+  const timestamp = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0")
+  ].join("/") + " " + [
+    String(now.getHours()).padStart(2, "0"),
+    String(now.getMinutes()).padStart(2, "0"),
+    String(now.getSeconds()).padStart(2, "0")
+  ].join(":");
+
+  const resultLabel = resultSymbol === RESULT_MATCH ? "OK" : resultSymbol === RESULT_MISMATCH ? "NG" : resultSymbol;
+  return `${resultLabel},${masterData},${slaveData},${timestamp}`;
+}
+
+function buildLogFileName(value) {
+  const normalized = value.trim().replace(/[\\/:*?"<>|]/g, "").replace(/\.txt$/i, "");
+  return `${normalized || DEFAULT_LOG_FILE_NAME}.txt`;
+}
+
+function setScreen(screen) {
+  state.screen = screen;
+  elements.verificationScreen.classList.toggle("is-active", screen === "verification");
+  elements.settingsScreen.classList.toggle("is-active", screen === "settings");
+
+  if (screen === "verification") {
+    focusNext();
+  }
+}
+
+function playTone(isMatch) {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return;
+
+  const context = new AudioContext();
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.type = isMatch ? "sine" : "square";
+  oscillator.frequency.value = isMatch ? 880 : 180;
+  gain.gain.setValueAtTime(0.08, context.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + (isMatch ? 0.18 : 0.3));
+  oscillator.connect(gain).connect(context.destination);
+  oscillator.start();
+  oscillator.stop(context.currentTime + (isMatch ? 0.18 : 0.3));
+}
+
+function appendVerificationLog(masterData, slaveData, resultSymbol) {
+  try {
+    state.logs.push(buildVerificationLogLine(masterData, slaveData, resultSymbol));
+    saveState();
+    elements.logMessage.hidden = true;
+  } catch {
+    elements.logMessage.hidden = false;
+  }
+}
+
+function focusNext() {
+  if (!state.selectedMode || state.resultSymbol === RESULT_MISMATCH) return;
+
+  requestAnimationFrame(() => {
+    if (state.masterData) {
+      elements.slaveInput.focus();
+    } else {
+      elements.masterInput.focus();
+    }
+  });
+}
+
+function render() {
+  const inputEnabled = state.selectedMode !== null && state.resultSymbol !== RESULT_MISMATCH;
+  const settingsEnabled = state.masterData.length === 0;
+
+  elements.modeButtons.forEach((button) => {
+    const isSelected = button.dataset.mode === state.selectedMode;
+    button.classList.toggle("is-selected", isSelected);
+    button.disabled = state.resultSymbol === RESULT_MISMATCH;
+  });
+
+  elements.modeMessage.textContent = state.selectedMode ? state.resultMessage : "照合モードを選択してください";
+  elements.matchCount.textContent = `${state.matchCount}件`;
+  elements.settingsMatchCount.textContent = `${state.matchCount}件`;
+  elements.resultSymbol.textContent = state.resultSymbol;
+  elements.resultSymbol.className = "result-symbol " + (
+    state.resultSymbol === RESULT_MATCH ? "ok" : state.resultSymbol === RESULT_MISMATCH ? "ng" : "pending"
+  );
+
+  elements.openSettings.disabled = !settingsEnabled;
+  elements.masterInput.disabled = !inputEnabled;
+  elements.slaveInput.disabled = !inputEnabled;
+  elements.masterInput.value = state.masterInput;
+  elements.slaveInput.value = state.slaveData;
+  elements.masterStart.value = state.masterStartPosition;
+  elements.slaveStart.value = state.slaveStartPosition;
+  elements.comparisonDigits.value = state.comparisonDigits;
+  elements.logFileName.value = state.logFileNameSetting;
+}
+
+function selectMode(mode) {
+  state.selectedMode = mode;
+  state.resultMessage = state.masterData ? STATUS_REGISTERED : STATUS_WAITING;
+  render();
+  focusNext();
+}
+
+function registerMasterData(value = state.masterInput) {
+  if (!value) return;
+  state.masterData = value;
+  state.resultSymbol = RESULT_PENDING;
+  state.resultMessage = STATUS_REGISTERED;
+  render();
+  focusNext();
+}
+
+function submitSlaveData(value) {
+  if (!value) return;
+  compareData(value);
+}
+
+function compareData(currentSlaveData) {
+  if (!state.masterData || !currentSlaveData) return;
+
+  const comparableMasterData = extractComparableSegment(
+    state.masterData,
+    state.masterStartPosition,
+    state.comparisonDigits
+  );
+  const comparableSlaveData = extractComparableSegment(
+    currentSlaveData,
+    state.slaveStartPosition,
+    state.comparisonDigits
+  );
+  const isMatch = comparableMasterData !== "" && comparableSlaveData !== "" && comparableMasterData === comparableSlaveData;
+  const comparisonResult = isMatch ? RESULT_MATCH : RESULT_MISMATCH;
+
+  state.resultSymbol = comparisonResult;
+  state.resultMessage = isMatch ? STATUS_MATCH : STATUS_MISMATCH;
+  if (isMatch) state.matchCount += 1;
+  appendVerificationLog(state.masterData, currentSlaveData, comparisonResult);
+  playTone(isMatch);
+
+  if (state.selectedMode === "one-to-many" && isMatch) {
+    state.slaveData = "";
+  } else if (isMatch) {
+    state.masterInput = "";
+    state.masterData = "";
+    state.slaveData = "";
+  }
+
+  saveState();
+  render();
+  focusNext();
+}
+
+function clearVerification() {
+  state.masterInput = "";
+  state.masterData = "";
+  state.slaveData = "";
+  state.resultSymbol = RESULT_PENDING;
+  state.resultMessage = STATUS_WAITING;
+  render();
+  focusNext();
+}
+
+function retryInput() {
+  if (state.resultSymbol !== RESULT_MISMATCH) return;
+  state.slaveData = "";
+  state.resultSymbol = RESULT_PENDING;
+  state.resultMessage = STATUS_REGISTERED;
+  render();
+  focusNext();
+}
+
+function confirmAction(message, onConfirm) {
+  elements.dialogMessage.textContent = message;
+  elements.dialogOk.onclick = () => onConfirm();
+  elements.dialog.showModal();
+}
+
+function downloadLog() {
+  const content = state.logs.length ? `${state.logs.join("\n")}\n` : "";
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = buildLogFileName(state.logFileNameSetting);
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+elements.modeButtons.forEach((button) => {
+  button.addEventListener("click", () => selectMode(button.dataset.mode));
+});
+
+elements.openSettings.addEventListener("click", () => setScreen("settings"));
+elements.backButton.addEventListener("click", () => setScreen("verification"));
+elements.clearButton.addEventListener("click", clearVerification);
+elements.retryButton.addEventListener("click", retryInput);
+
+elements.masterInput.addEventListener("input", (event) => {
+  const rawValue = event.target.value;
+  const sanitizedValue = sanitizeScanInput(rawValue);
+  state.masterInput = sanitizedValue;
+  if (hasScanTerminator(rawValue) && sanitizedValue) {
+    registerMasterData(sanitizedValue);
+  }
+  render();
+});
+
+elements.masterInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    registerMasterData();
+  }
+});
+
+elements.slaveInput.addEventListener("input", (event) => {
+  const rawValue = event.target.value;
+  const sanitizedValue = sanitizeScanInput(rawValue);
+  state.slaveData = sanitizedValue;
+  if (hasScanTerminator(rawValue) && sanitizedValue) {
+    submitSlaveData(sanitizedValue);
+  }
+  render();
+});
+
+elements.slaveInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    submitSlaveData(state.slaveData);
+  }
+});
+
+elements.masterStart.addEventListener("input", (event) => {
+  state.masterStartPosition = digitsOnly(event.target.value);
+  saveState();
+  render();
+});
+
+elements.slaveStart.addEventListener("input", (event) => {
+  state.slaveStartPosition = digitsOnly(event.target.value);
+  saveState();
+  render();
+});
+
+elements.comparisonDigits.addEventListener("input", (event) => {
+  state.comparisonDigits = digitsOnly(event.target.value);
+  saveState();
+  render();
+});
+
+elements.logFileName.addEventListener("input", (event) => {
+  state.logFileNameSetting = event.target.value;
+  elements.logMessage.hidden = true;
+  saveState();
+  render();
+});
+
+elements.clearCountButton.addEventListener("click", () => {
+  confirmAction("照合件数をクリアしてよいですか？", () => {
+    state.matchCount = 0;
+    saveState();
+    render();
+  });
+});
+
+elements.deleteLogButton.addEventListener("click", () => {
+  confirmAction("ログファイルを消去し、照合件数もクリアしてよいですか？", () => {
+    state.logs = [];
+    state.matchCount = 0;
+    saveState();
+    render();
+  });
+});
+
+elements.downloadLogButton.addEventListener("click", downloadLog);
+
+loadState();
+render();
