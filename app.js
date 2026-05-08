@@ -40,6 +40,7 @@ const elements = {
   masterInput: document.querySelector("#master-input"),
   slaveInput: document.querySelector("#slave-input"),
   scannerCaptureInput: document.querySelector("#scanner-capture-input"),
+  scannerKeyCapture: document.querySelector("#scanner-key-capture"),
   clearButton: document.querySelector("#clear-button"),
   retryButton: document.querySelector("#retry-button"),
   keyboardToggleButton: document.querySelector("#keyboard-toggle-button"),
@@ -206,10 +207,7 @@ function focusScannerCapture(options = {}) {
   if (!inputEnabled()) return;
 
   const { forceRefocus = false } = options;
-  const input = elements.scannerCaptureInput;
-  applyKeyboardMode(input, false);
-  input.disabled = false;
-  input.value = "";
+  const input = elements.scannerKeyCapture;
 
   if (document.activeElement && document.activeElement !== input && document.activeElement.blur) {
     document.activeElement.blur();
@@ -294,12 +292,17 @@ function hideSoftwareKeyboardAndPrimeScanner() {
 
   const input = targetInput();
   suppressKeyboardForVisibleInputs();
+  elements.scannerCaptureInput.readOnly = true;
+  elements.scannerCaptureInput.inputMode = "none";
+  elements.scannerCaptureInput.setAttribute("inputmode", "none");
   input.disabled = true;
   input.blur();
+  elements.scannerCaptureInput.blur();
   if (document.activeElement && document.activeElement.blur) {
     document.activeElement.blur();
   }
   hideVirtualKeyboard();
+  elements.scannerKeyCapture.focus();
 
   window.setTimeout(() => {
     input.disabled = false;
@@ -631,7 +634,11 @@ elements.scannerCaptureInput.addEventListener("keydown", (event) => {
 document.addEventListener("keydown", (event) => {
   if (state.screen !== "verification" || state.isSoftwareKeyboardVisible || !inputEnabled()) return;
   if (event.ctrlKey || event.altKey || event.metaKey) return;
-  if (event.target === elements.masterInput || event.target === elements.slaveInput) return;
+  if (
+    event.target === elements.masterInput ||
+    event.target === elements.slaveInput ||
+    event.target === elements.scannerCaptureInput
+  ) return;
 
   if (event.key === "Enter") {
     event.preventDefault();
@@ -664,7 +671,11 @@ document.addEventListener("paste", (event) => {
 
 document.addEventListener("beforeinput", (event) => {
   if (state.screen !== "verification" || state.isSoftwareKeyboardVisible || !inputEnabled()) return;
-  if (event.target === elements.masterInput || event.target === elements.slaveInput) return;
+  if (
+    event.target === elements.masterInput ||
+    event.target === elements.slaveInput ||
+    event.target === elements.scannerCaptureInput
+  ) return;
   if (event.inputType !== "insertText" || !event.data) return;
 
   event.preventDefault();
