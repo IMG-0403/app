@@ -214,7 +214,6 @@ function toggleSoftwareKeyboard() {
       input.focus();
       input.setSelectionRange(input.value.length, input.value.length);
     } else {
-      input.blur();
       focusNext();
     }
   });
@@ -241,8 +240,12 @@ function render() {
   elements.openSettings.disabled = !settingsEnabled;
   elements.masterInput.disabled = !isInputEnabled;
   elements.slaveInput.disabled = !isInputEnabled;
-  elements.masterInput.readOnly = !state.isSoftwareKeyboardVisible;
-  elements.slaveInput.readOnly = !state.isSoftwareKeyboardVisible;
+  elements.masterInput.readOnly = false;
+  elements.slaveInput.readOnly = false;
+  elements.masterInput.inputMode = state.isSoftwareKeyboardVisible ? "text" : "none";
+  elements.slaveInput.inputMode = state.isSoftwareKeyboardVisible ? "text" : "none";
+  elements.masterInput.setAttribute("inputmode", elements.masterInput.inputMode);
+  elements.slaveInput.setAttribute("inputmode", elements.slaveInput.inputMode);
   elements.masterInput.value = state.masterInput;
   elements.slaveInput.value = state.slaveData;
   elements.keyboardToggleButton.disabled = !isInputEnabled;
@@ -367,7 +370,6 @@ elements.masterInput.addEventListener("pointerdown", () => {
 });
 
 elements.masterInput.addEventListener("input", (event) => {
-  if (!state.isSoftwareKeyboardVisible) return;
   const rawValue = event.target.value;
   const sanitizedValue = sanitizeScanInput(rawValue);
   state.masterInput = sanitizedValue;
@@ -378,7 +380,6 @@ elements.masterInput.addEventListener("input", (event) => {
 });
 
 elements.masterInput.addEventListener("keydown", (event) => {
-  if (!state.isSoftwareKeyboardVisible) return;
   if (event.key === "Enter") {
     event.preventDefault();
     registerMasterData();
@@ -394,7 +395,6 @@ elements.slaveInput.addEventListener("pointerdown", () => {
 });
 
 elements.slaveInput.addEventListener("input", (event) => {
-  if (!state.isSoftwareKeyboardVisible) return;
   const rawValue = event.target.value;
   const sanitizedValue = sanitizeScanInput(rawValue);
   state.slaveData = sanitizedValue;
@@ -405,7 +405,6 @@ elements.slaveInput.addEventListener("input", (event) => {
 });
 
 elements.slaveInput.addEventListener("keydown", (event) => {
-  if (!state.isSoftwareKeyboardVisible) return;
   if (event.key === "Enter") {
     event.preventDefault();
     submitSlaveData(state.slaveData);
@@ -415,6 +414,7 @@ elements.slaveInput.addEventListener("keydown", (event) => {
 document.addEventListener("keydown", (event) => {
   if (state.screen !== "verification" || state.isSoftwareKeyboardVisible || !inputEnabled()) return;
   if (event.ctrlKey || event.altKey || event.metaKey) return;
+  if (event.target === elements.masterInput || event.target === elements.slaveInput) return;
 
   if (event.key === "Enter") {
     event.preventDefault();
