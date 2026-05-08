@@ -245,12 +245,12 @@ function restoreScannerInputSilently() {
 
   state.isSoftwareKeyboardVisible = false;
   render();
-  focusNext({ showKeyboard: false, forceRefocus: true });
+  focusNext({ showKeyboard: false, forceRefocus: false });
   hideVirtualKeyboard();
 
   window.setTimeout(() => {
     render();
-    focusNext({ showKeyboard: false, forceRefocus: true });
+    focusNext({ showKeyboard: false, forceRefocus: false });
     hideVirtualKeyboard();
   }, 120);
 }
@@ -463,10 +463,32 @@ elements.modeButtons.forEach((button) => {
   button.addEventListener("click", () => selectMode(button.dataset.mode));
 });
 
+function bindScannerActionButton(button, action) {
+  let handledPointerAction = false;
+
+  button.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+  });
+
+  button.addEventListener("pointerup", (event) => {
+    event.preventDefault();
+    handledPointerAction = true;
+    action();
+    window.setTimeout(() => {
+      handledPointerAction = false;
+    }, 0);
+  });
+
+  button.addEventListener("click", () => {
+    if (handledPointerAction) return;
+    action();
+  });
+}
+
 elements.openSettings.addEventListener("click", () => setScreen("settings"));
 elements.backButton.addEventListener("click", () => setScreen("verification"));
-elements.clearButton.addEventListener("click", clearVerification);
-elements.retryButton.addEventListener("click", retryInput);
+bindScannerActionButton(elements.clearButton, clearVerification);
+bindScannerActionButton(elements.retryButton, retryInput);
 elements.keyboardToggleButton.addEventListener("click", toggleSoftwareKeyboard);
 
 elements.masterInput.addEventListener("focus", () => {
