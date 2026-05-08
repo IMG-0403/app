@@ -209,8 +209,12 @@ function focusNext(options = {}) {
 }
 
 function hideVirtualKeyboard() {
-  if (navigator.virtualKeyboard?.hide) {
-    navigator.virtualKeyboard.hide();
+  if (navigator.virtualKeyboard && navigator.virtualKeyboard.hide) {
+    try {
+      navigator.virtualKeyboard.hide();
+    } catch {
+      // Some Android browsers expose the API but reject programmatic hide.
+    }
   }
 }
 
@@ -492,7 +496,7 @@ document.addEventListener("keydown", (event) => {
 
 document.addEventListener("paste", (event) => {
   if (state.screen !== "verification" || state.isSoftwareKeyboardVisible || !inputEnabled()) return;
-  const text = event.clipboardData?.getData("text") || "";
+  const text = event.clipboardData ? event.clipboardData.getData("text") : "";
   if (!text) return;
 
   event.preventDefault();
