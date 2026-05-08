@@ -5,7 +5,7 @@ const STATUS_WAITING = "照合待ち";
 const STATUS_REGISTERED = "マスターデータ登録済み";
 const STATUS_MATCH = "照合成功";
 const STATUS_MISMATCH = "照合失敗";
-const DEFAULT_LOG_FILE_NAME = "PPY000000";
+const DEFAULT_LOG_FILE_NAME = "PY000000";
 const STORAGE_KEY = "ppy-web-state";
 
 const state = {

@@ -74,18 +74,6 @@ h1 {
   font-weight: 800;
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.brand img {
-  width: 44px;
-  height: 44px;
-  border-radius: var(--radius);
-}
-
 .mode-tabs {
   display: flex;
   gap: 12px;
@@ -172,7 +160,7 @@ h1 {
 }
 
 .verification-form,
-.settings-screen {
+.screen.settings-screen.is-active {
   display: grid;
   gap: 16px;
 }
