@@ -418,6 +418,9 @@ function selectMode(mode) {
   state.isSoftwareKeyboardVisible = false;
   render();
   primeScannerInput();
+  window.setTimeout(() => {
+    restoreScannerInputSilently();
+  }, 320);
 }
 
 function registerMasterData(value = state.masterInput) {
@@ -510,10 +513,6 @@ function downloadLog() {
   URL.revokeObjectURL(url);
 }
 
-elements.modeButtons.forEach((button) => {
-  button.addEventListener("click", () => selectMode(button.dataset.mode));
-});
-
 function bindScannerActionButton(button, action) {
   let handledPointerAction = false;
   let handledTouchAction = false;
@@ -568,6 +567,10 @@ function bindScannerActionButton(button, action) {
     action();
   });
 }
+
+elements.modeButtons.forEach((button) => {
+  bindScannerActionButton(button, () => selectMode(button.dataset.mode));
+});
 
 elements.openSettings.addEventListener("click", () => setScreen("settings"));
 elements.backButton.addEventListener("click", () => setScreen("verification"));
