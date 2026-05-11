@@ -159,6 +159,46 @@ h1 {
   color: var(--danger);
 }
 
+.menu-screen.is-active {
+  display: grid;
+  align-content: start;
+  gap: 22px;
+}
+
+.menu-header {
+  padding-top: 10px;
+}
+
+.menu-list {
+  display: grid;
+  gap: 12px;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 68px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: #111720;
+  padding: 0 18px;
+  text-align: left;
+  font-size: 22px;
+  font-weight: 750;
+}
+
+.menu-item:active {
+  background: var(--primary-soft);
+  border-color: #b7d0fb;
+}
+
+.menu-number {
+  color: var(--primary);
+}
+
 .verification-form,
 .screen.settings-screen.is-active {
   display: grid;

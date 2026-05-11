@@ -9,7 +9,7 @@ const DEFAULT_LOG_FILE_NAME = "PY000000";
 const STORAGE_KEY = "ppy-web-state";
 
 const state = {
-  screen: "verification",
+  screen: "menu",
   selectedMode: null,
   masterInput: "",
   masterData: "",
@@ -27,6 +27,8 @@ const state = {
 };
 
 const elements = {
+  menuScreen: document.querySelector("#menu-screen"),
+  launchPyButton: document.querySelector("#launch-py-button"),
   verificationScreen: document.querySelector("#verification-screen"),
   settingsScreen: document.querySelector("#settings-screen"),
   modeButtons: document.querySelectorAll(".mode-button"),
@@ -131,6 +133,7 @@ function setScreen(screen) {
   if (screen !== "verification") {
     state.isSoftwareKeyboardVisible = false;
   }
+  elements.menuScreen.classList.toggle("is-active", screen === "menu");
   elements.verificationScreen.classList.toggle("is-active", screen === "verification");
   elements.settingsScreen.classList.toggle("is-active", screen === "settings");
 
@@ -138,6 +141,10 @@ function setScreen(screen) {
     render();
     focusNext({ defer: true });
   }
+}
+
+function launchPyApp() {
+  setScreen("verification");
 }
 
 function playTone(isMatch) {
@@ -562,6 +569,7 @@ function bindScannerActionButton(button, action) {
 
 elements.openSettings.addEventListener("click", () => setScreen("settings"));
 elements.backButton.addEventListener("click", () => setScreen("verification"));
+elements.launchPyButton.addEventListener("click", launchPyApp);
 bindScannerActionButton(elements.clearButton, clearVerification);
 bindScannerActionButton(elements.retryButton, retryInput);
 elements.keyboardToggleButton.addEventListener("click", toggleSoftwareKeyboard);
