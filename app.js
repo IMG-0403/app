@@ -7,6 +7,7 @@ const STATUS_MATCH = "照合成功";
 const STATUS_MISMATCH = "照合失敗";
 const DEFAULT_LOG_FILE_NAME = "PY000000";
 const STORAGE_KEY = "ppy-web-state";
+const HONEYWELL_READER_OK = 0;
 
 const state = {
   screen: "menu",
@@ -26,6 +27,9 @@ const state = {
   activeInputTarget: "master"
 };
 
+let honeywellBarcodeReader = null;
+let honeywellBarcodeReaderOpening = false;
+
 const elements = {
   menuScreen: document.querySelector("#menu-screen"),
   launchPyButton: document.querySelector("#launch-py-button"),
@@ -42,6 +46,7 @@ const elements = {
   masterInput: document.querySelector("#master-input"),
   slaveInput: document.querySelector("#slave-input"),
   scannerCaptureInput: document.querySelector("#scanner-capture-input"),
+  keyboardFocusSink: document.querySelector("#keyboard-focus-sink"),
   clearButton: document.querySelector("#clear-button"),
   retryButton: document.querySelector("#retry-button"),
   keyboardToggleButton: document.querySelector("#keyboard-toggle-button"),
@@ -71,7 +76,7 @@ function loadState() {
       logFileNameSetting: parsed.logFileNameSetting || DEFAULT_LOG_FILE_NAME,
       logs: Array.isArray(parsed.logs) ? parsed.logs : []
     });
-  } catch {
+  } catch (error) {
     localStorage.removeItem(STORAGE_KEY);
   }
 }
@@ -146,6 +151,7 @@ function setScreen(screen) {
 }
 
 function launchPyApp() {
+  openHoneywellBarcodeReader();
   setScreen("verification");
 }
 
@@ -170,8 +176,78 @@ function appendVerificationLog(masterData, slaveData, resultSymbol) {
     state.logs.push(buildVerificationLogLine(masterData, slaveData, resultSymbol));
     saveState();
     elements.logMessage.hidden = true;
-  } catch {
+  } catch (error) {
     elements.logMessage.hidden = false;
+  }
+}
+
+function handleHoneywellBarcodeData(data) {
+  const scanData = sanitizeScanInput(String(data || ""));
+  if (!scanData || !inputEnabled()) return;
+
+  if (state.activeInputTarget === "slave" || state.masterData) {
+    state.slaveData = scanData;
+    render();
+    submitSlaveData(scanData);
+    return;
+  }
+
+  state.masterInput = scanData;
+  render();
+  registerMasterData(scanData);
+}
+
+function onHoneywellBarcodeReaderComplete(result) {
+  honeywellBarcodeReaderOpening = false;
+
+  if (!result || result.status !== HONEYWELL_READER_OK) {
+    honeywellBarcodeReader = null;
+    return;
+  }
+
+  honeywellBarcodeReader.setBuffered("Symbology", "Code39", "Enable", "true", function () {});
+  honeywellBarcodeReader.setBuffered("Symbology", "Code128", "EnableCode128", "true", function () {});
+  honeywellBarcodeReader.setBuffered("Symbology", "EANUPC", "EnableEAN13", "true", function () {});
+  honeywellBarcodeReader.setBuffered("Symbology", "QRCode", "Enable", "true", function () {});
+  honeywellBarcodeReader.commitBuffer(function () {});
+  honeywellBarcodeReader.addEventListener("barcodedataready", handleHoneywellBarcodeData, false);
+  enableHoneywellBarcodeTrigger();
+}
+
+function openHoneywellBarcodeReader() {
+  if (honeywellBarcodeReader || honeywellBarcodeReaderOpening) return;
+  if (typeof BarcodeReader === "undefined") return;
+
+  honeywellBarcodeReaderOpening = true;
+  try {
+    honeywellBarcodeReader = new BarcodeReader(null, onHoneywellBarcodeReaderComplete);
+  } catch (error) {
+    honeywellBarcodeReader = null;
+    honeywellBarcodeReaderOpening = false;
+  }
+}
+
+function enableHoneywellBarcodeTrigger() {
+  if (!honeywellBarcodeReader || !honeywellBarcodeReader.enableTrigger) return;
+
+  try {
+    honeywellBarcodeReader.enableTrigger(true, function () {});
+  } catch (error) {
+    // Trigger control is best effort; barcode events may still arrive on some devices.
+  }
+}
+
+function closeHoneywellBarcodeReader() {
+  if (!honeywellBarcodeReader) return;
+
+  try {
+    honeywellBarcodeReader.close(function () {
+      honeywellBarcodeReader = null;
+      honeywellBarcodeReaderOpening = false;
+    });
+  } catch (error) {
+    honeywellBarcodeReader = null;
+    honeywellBarcodeReaderOpening = false;
   }
 }
 
@@ -182,12 +258,28 @@ function applyKeyboardMode(input, isVisible) {
 }
 
 function suppressKeyboardForVisibleInputs() {
-  [elements.masterInput, elements.slaveInput].forEach((input) => {
+  [elements.masterInput, elements.slaveInput, elements.scannerCaptureInput].forEach((input) => {
     input.readOnly = true;
     input.inputMode = "none";
     input.setAttribute("inputmode", "none");
     input.setAttribute("virtualkeyboardpolicy", "manual");
   });
+}
+
+function moveFocusAwayFromInputs() {
+  [
+    elements.masterInput,
+    elements.slaveInput,
+    elements.scannerCaptureInput
+  ].forEach((input) => {
+    input.blur();
+  });
+
+  try {
+    elements.keyboardFocusSink.focus({ preventScroll: true });
+  } catch (error) {
+    elements.keyboardFocusSink.focus();
+  }
 }
 
 function focusInput(input, options = {}) {
@@ -205,7 +297,7 @@ function focusInput(input, options = {}) {
 
   try {
     input.focus({ preventScroll: true });
-  } catch {
+  } catch (error) {
     input.focus();
   }
   input.setSelectionRange(input.value.length, input.value.length);
@@ -231,7 +323,7 @@ function focusScannerCapture(options = {}) {
 
   try {
     input.focus({ preventScroll: true });
-  } catch {
+  } catch (error) {
     input.focus();
   }
 }
@@ -260,7 +352,7 @@ function hideVirtualKeyboard() {
   if (navigator.virtualKeyboard && navigator.virtualKeyboard.hide) {
     try {
       navigator.virtualKeyboard.hide();
-    } catch {
+    } catch (error) {
       // Some Android browsers expose the API but reject programmatic hide.
     }
   }
@@ -302,21 +394,13 @@ function restoreScannerInputSilently() {
 function hideSoftwareKeyboardAndPrimeScanner() {
   state.isSoftwareKeyboardVisible = false;
 
-  const input = targetInput();
   suppressKeyboardForVisibleInputs();
-  elements.scannerCaptureInput.readOnly = false;
-  applyKeyboardMode(elements.scannerCaptureInput, false);
-  input.disabled = true;
-  input.blur();
-  if (document.activeElement && document.activeElement.blur) {
-    document.activeElement.blur();
-  }
+  moveFocusAwayFromInputs();
   hideVirtualKeyboard();
 
   window.setTimeout(() => {
-    input.disabled = false;
     render();
-    focusScannerCapture({ forceRefocus: true });
+    moveFocusAwayFromInputs();
     hideVirtualKeyboard();
   }, 160);
 }
@@ -416,7 +500,10 @@ function selectMode(mode) {
   state.selectedMode = mode;
   state.resultMessage = state.masterData ? STATUS_REGISTERED : STATUS_WAITING;
   state.isSoftwareKeyboardVisible = false;
+  state.activeInputTarget = state.masterData ? "slave" : "master";
   render();
+  openHoneywellBarcodeReader();
+  enableHoneywellBarcodeTrigger();
   primeScannerInput();
   window.setTimeout(() => {
     restoreScannerInputSilently();
@@ -738,6 +825,19 @@ elements.deleteLogButton.addEventListener("click", () => {
 });
 
 elements.downloadLogButton.addEventListener("click", downloadLog);
+
+window.addEventListener("beforeunload", closeHoneywellBarcodeReader);
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    closeHoneywellBarcodeReader();
+    return;
+  }
+
+  if (state.screen === "verification") {
+    openHoneywellBarcodeReader();
+  }
+});
 
 loadState();
 render();
