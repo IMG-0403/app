@@ -238,6 +238,22 @@
         </section>
 
         <section class="panel hidden" id="adminPanel">
+            <p class="label">GitHub設定</p>
+            <div class="grid">
+                <div class="field">
+                    <label for="owner">Owner / Organization</label>
+                    <input id="owner" autocomplete="organization" placeholder="例: img-0403">
+                </div>
+                <div class="field">
+                    <label for="repo">Repository</label>
+                    <input id="repo" autocomplete="off" placeholder="例: PicScan">
+                </div>
+                <div class="field">
+                    <label for="token">GitHub Token</label>
+                    <input id="token" type="password" autocomplete="off" placeholder="Contents Read and write">
+                </div>
+            </div>
+
             <p class="label">画像管理</p>
             <div class="grid">
                 <div class="field">
@@ -269,6 +285,9 @@
     <script>
         const accountInput = document.getElementById("account");
         const passwordInput = document.getElementById("password");
+        const ownerInput = document.getElementById("owner");
+        const repoInput = document.getElementById("repo");
+        const tokenInput = document.getElementById("token");
         const modelInput = document.getElementById("model");
         const photoInput = document.getElementById("photo");
         const loginPanel = document.getElementById("loginPanel");
@@ -289,6 +308,9 @@
         let session = null;
         let currentImage = null;
         let currentObjectUrl = "";
+
+        ownerInput.value = localStorage.getItem("picscanOwner") || "img-0403";
+        repoInput.value = localStorage.getItem("picscanRepo") || "PicScan";
 
         function setStatus(message) {
             statusBox.textContent = message;
@@ -359,10 +381,10 @@
 
         function buildGitHubSession() {
             return {
-                owner: (localStorage.getItem("picscanOwner") || "").trim(),
-                repo: (localStorage.getItem("picscanRepo") || "").trim(),
-                branch: (localStorage.getItem("picscanBranch") || "main").trim() || "main",
-                token: (sessionStorage.getItem("picscanToken") || "").trim()
+                owner: ownerInput.value.trim(),
+                repo: repoInput.value.trim(),
+                branch: "main",
+                token: tokenInput.value.trim()
             };
         }
 
@@ -371,6 +393,8 @@
             if (!session.owner || !session.repo || !session.token) {
                 throw new Error("GitHub接続情報が不足しています。");
             }
+            localStorage.setItem("picscanOwner", session.owner);
+            localStorage.setItem("picscanRepo", session.repo);
         }
 
         function githubHeaders() {
