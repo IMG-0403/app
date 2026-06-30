@@ -166,6 +166,17 @@
             color: #5b6b7b;
         }
 
+        .searchedModel {
+            margin: 0 0 10px;
+            color: #334455;
+            font-weight: 700;
+            overflow-wrap: anywhere;
+        }
+
+        .searchedModel:empty {
+            display: none;
+        }
+
         code {
             padding: 2px 5px;
             border-radius: 4px;
@@ -218,6 +229,7 @@
 
         <section class="emptyState" id="message">
             <p class="label">PicScan</p>
+            <p class="searchedModel" id="messageModel"></p>
             <h2 id="messageTitle">型番を入力すると、登録済み画像を表示します</h2>
             <p id="messageText">画像ファイルは <code>images</code> フォルダに配置してください。</p>
         </section>
@@ -230,6 +242,7 @@
         const resultTitle = document.getElementById("resultTitle");
         const resultImage = document.getElementById("resultImage");
         const message = document.getElementById("message");
+        const messageModel = document.getElementById("messageModel");
         const messageTitle = document.getElementById("messageTitle");
         const messageText = document.getElementById("messageText");
         const extensions = ["", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg"];
@@ -247,9 +260,10 @@
             }));
         }
 
-        function showMessage(title, text) {
+        function showMessage(title, text, searchedModel = "") {
             result.classList.remove("isVisible");
             message.classList.remove("isHidden");
+            messageModel.textContent = searchedModel ? `入力型番: ${searchedModel}` : "";
             messageTitle.textContent = title;
             messageText.textContent = text;
         }
@@ -260,21 +274,24 @@
             resultImage.src = candidate.url;
             message.classList.add("isHidden");
             result.classList.add("isVisible");
+            modelInput.value = "";
         }
 
-        function tryLoad(candidates, index = 0) {
+        function tryLoad(candidates, searchedModel, index = 0) {
             if (index >= candidates.length) {
                 showMessage(
-                    "該当する画像が見つかりません",
-                    "入力した型番と同じ名前の画像ファイルが images フォルダにあるか確認してください。"
+                    "該当する画像がありません",
+                    "入力した型番と同じ名前の画像ファイルが images フォルダにあるか確認してください。",
+                    searchedModel
                 );
+                modelInput.value = "";
                 return;
             }
 
             const candidate = candidates[index];
             const probe = new Image();
             probe.onload = () => showImage(candidate);
-            probe.onerror = () => tryLoad(candidates, index + 1);
+            probe.onerror = () => tryLoad(candidates, searchedModel, index + 1);
             probe.src = `${candidate.url}?v=${Date.now()}`;
         }
 
@@ -288,7 +305,7 @@
             const params = new URLSearchParams(window.location.search);
             params.set("model", trimmed);
             window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
-            tryLoad(buildCandidates(trimmed));
+            tryLoad(buildCandidates(trimmed), trimmed);
         }
 
         form.addEventListener("submit", (event) => {
