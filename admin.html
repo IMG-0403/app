@@ -97,24 +97,33 @@
         }
 
         input,
+        textarea,
         button {
             min-height: 44px;
             border-radius: 6px;
             font: inherit;
         }
 
-        input {
+        input,
+        textarea {
             width: 100%;
             border: 1px solid #c7d1db;
             padding: 0 13px;
             background: #fbfcfd;
         }
 
+        textarea {
+            min-height: 92px;
+            padding: 10px 13px;
+            resize: vertical;
+        }
+
         input[type="file"] {
             padding: 10px 13px;
         }
 
-        input:focus {
+        input:focus,
+        textarea:focus {
             border-color: #2274a5;
             box-shadow: 0 0 0 3px rgba(34, 116, 165, 0.18);
             outline: none;
@@ -175,6 +184,18 @@
         .resultMeta {
             margin: 0;
             color: #334455;
+            overflow-wrap: anywhere;
+        }
+
+        .imageComment {
+            margin: 0;
+            padding: 12px 14px;
+            border: 1px solid #dce3ea;
+            border-radius: 8px;
+            background: #fbfcfd;
+            color: #17212b;
+            line-height: 1.65;
+            white-space: pre-wrap;
             overflow-wrap: anywhere;
         }
 
@@ -299,15 +320,21 @@
                     <label for="photo">画像</label>
                     <input id="photo" type="file" accept="image/*" capture="environment">
                 </div>
+                <div class="field full">
+                    <label for="comment">コメント</label>
+                    <textarea id="comment" maxlength="1000" placeholder="画像と一緒に表示するコメント"></textarea>
+                </div>
             </div>
             <div class="actions">
                 <button id="uploadButton" type="button">画像を保存</button>
                 <button id="searchButton" class="secondary" type="button">検索</button>
+                <button id="commentButton" class="secondary" type="button" disabled>コメント保存</button>
                 <button id="renameButton" class="secondary" type="button" disabled>名前変更</button>
                 <button id="deleteButton" class="danger" type="button" disabled>画像データ削除</button>
             </div>
             <div class="previewPanel hidden" id="previewPanel">
                 <p class="resultMeta" id="resultMeta"></p>
+                <p class="imageComment hidden" id="resultComment"></p>
                 <div class="imagePreview">
                     <img id="resultImage" alt="">
                 </div>
@@ -333,15 +360,18 @@
         const tokenInput = document.getElementById("token");
         const modelInput = document.getElementById("model");
         const photoInput = document.getElementById("photo");
+        const commentInput = document.getElementById("comment");
         const loginPanel = document.getElementById("loginPanel");
         const adminPanel = document.getElementById("adminPanel");
         const previewPanel = document.getElementById("previewPanel");
         const resultMeta = document.getElementById("resultMeta");
+        const resultComment = document.getElementById("resultComment");
         const resultImage = document.getElementById("resultImage");
         const statusBox = document.getElementById("status");
         const loginButton = document.getElementById("loginButton");
         const uploadButton = document.getElementById("uploadButton");
         const searchButton = document.getElementById("searchButton");
+        const commentButton = document.getElementById("commentButton");
         const renameButton = document.getElementById("renameButton");
         const deleteButton = document.getElementById("deleteButton");
         const refreshListButton = document.getElementById("refreshListButton");
@@ -362,7 +392,7 @@
         }
 
         function setBusy(isBusy) {
-            [loginButton, uploadButton, searchButton, renameButton, deleteButton, refreshListButton].forEach((button) => {
+            [loginButton, uploadButton, searchButton, commentButton, renameButton, deleteButton, refreshListButton].forEach((button) => {
                 button.disabled = isBusy;
             });
             imageList.querySelectorAll("button").forEach((button) => {
@@ -375,6 +405,7 @@
 
         function updateResultActions() {
             const hasImage = Boolean(currentImage);
+            commentButton.disabled = !hasImage;
             renameButton.disabled = !hasImage || !currentImage.bytes;
             deleteButton.disabled = !hasImage;
         }
@@ -387,6 +418,9 @@
             }
             resultImage.removeAttribute("src");
             resultMeta.textContent = "";
+            resultComment.textContent = "";
+            resultComment.classList.add("hidden");
+            commentInput.value = "";
             previewPanel.classList.add("hidden");
             updateResultActions();
         }
@@ -407,6 +441,9 @@
             }
             resultImage.alt = image.name;
             resultMeta.textContent = `images/${image.name}`;
+            resultComment.textContent = image.comment || "";
+            resultComment.classList.toggle("hidden", !image.comment);
+            commentInput.value = image.comment || "";
             previewPanel.classList.remove("hidden");
             updateResultActions();
         }
@@ -467,6 +504,12 @@
             return includeRef ? `${base}?ref=${encodeURIComponent(session.branch)}` : base;
         }
 
+        function repoContentUrl(path, includeRef = true) {
+            const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+            const base = `https://api.github.com/repos/${session.owner}/${session.repo}/contents/${encodedPath}`;
+            return includeRef ? `${base}?ref=${encodeURIComponent(session.branch)}` : base;
+        }
+
         async function githubRequest(url, options = {}) {
             const response = await fetch(url, options);
             const text = await response.text();
@@ -476,6 +519,116 @@
                 throw new Error(`GitHub API error ${response.status}: ${message}`);
             }
             return body;
+        }
+
+        function decodeBase64Text(content) {
+            const binary = atob(content.replace(/\n/g, ""));
+            const bytes = new Uint8Array(binary.length);
+            for (let index = 0; index < binary.length; index += 1) {
+                bytes[index] = binary.charCodeAt(index);
+            }
+            return new TextDecoder().decode(bytes);
+        }
+
+        function encodeBase64Text(text) {
+            const bytes = new TextEncoder().encode(text);
+            let binary = "";
+            const chunkSize = 8192;
+            for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+                const chunk = bytes.slice(offset, offset + chunkSize);
+                binary += String.fromCharCode(...chunk);
+            }
+            return btoa(binary);
+        }
+
+        async function loadCommentsFile() {
+            const response = await fetch(repoContentUrl("comments.json"), {
+                headers: githubHeaders()
+            });
+            if (response.status === 404) {
+                return { sha: null, comments: {} };
+            }
+            const body = await response.json();
+            if (!response.ok) {
+                throw new Error(`GitHub API error ${response.status}: ${body.message || "request failed"}`);
+            }
+
+            let comments = {};
+            try {
+                comments = JSON.parse(decodeBase64Text(body.content));
+            } catch (error) {
+                comments = {};
+            }
+            return { sha: body.sha, comments: comments && typeof comments === "object" ? comments : {} };
+        }
+
+        async function saveCommentsFile(comments, sha) {
+            const payload = {
+                message: "Update image comments",
+                branch: session.branch,
+                content: encodeBase64Text(`${JSON.stringify(comments, null, 2)}\n`)
+            };
+            if (sha) {
+                payload.sha = sha;
+            }
+            await githubRequest(repoContentUrl("comments.json", false), {
+                method: "PUT",
+                headers: {
+                    ...githubHeaders(),
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
+            });
+        }
+
+        function commentKey(fileName) {
+            return `images/${fileName}`;
+        }
+
+        function readComment(comments, fileName) {
+            const value = comments[commentKey(fileName)] ?? comments[fileName] ?? "";
+            if (typeof value === "string") {
+                return value;
+            }
+            return value && typeof value.comment === "string" ? value.comment : "";
+        }
+
+        async function getComment(fileName) {
+            const { comments } = await loadCommentsFile();
+            return readComment(comments, fileName);
+        }
+
+        async function setComment(fileName, comment) {
+            const { sha, comments } = await loadCommentsFile();
+            const key = commentKey(fileName);
+            const trimmedComment = comment.trim();
+            delete comments[fileName];
+            if (trimmedComment) {
+                comments[key] = trimmedComment;
+            } else {
+                delete comments[key];
+            }
+            await saveCommentsFile(comments, sha);
+        }
+
+        async function moveComment(oldFileName, newFileName) {
+            const { sha, comments } = await loadCommentsFile();
+            const oldKey = commentKey(oldFileName);
+            const newKey = commentKey(newFileName);
+            const value = comments[oldKey] ?? comments[oldFileName];
+            delete comments[oldKey];
+            delete comments[oldFileName];
+            if (value) {
+                comments[newKey] = value;
+            }
+            await saveCommentsFile(comments, sha);
+        }
+
+        async function deleteComment(fileName) {
+            const { sha, comments } = await loadCommentsFile();
+            delete comments[commentKey(fileName)];
+            delete comments[fileName];
+            await saveCommentsFile(comments, sha);
         }
 
         async function listImages() {
@@ -572,6 +725,7 @@
                 setBusy(true);
                 setStatus(`削除中: images/${file.name}`);
                 await deleteImage(file.name, file.sha);
+                await deleteComment(file.name);
                 if (currentImage && currentImage.name === file.name) {
                     clearPreview();
                 }
@@ -600,12 +754,14 @@
             for (let index = 0; index < binary.length; index += 1) {
                 bytes[index] = binary.charCodeAt(index);
             }
+            const comment = await getComment(body.name);
             return {
                 name: body.name,
                 sha: body.sha,
                 bytes,
                 mimeType: contentTypeForName(body.name),
-                downloadUrl: body.download_url
+                downloadUrl: body.download_url,
+                comment
             };
         }
 
@@ -624,7 +780,8 @@
                     sha: file.sha,
                     bytes: null,
                     mimeType: contentTypeForName(file.name),
-                    downloadUrl: file.download_url
+                    downloadUrl: file.download_url,
+                    comment: await getComment(file.name)
                 };
             }
             return {
@@ -632,7 +789,8 @@
                 sha: file.sha,
                 bytes: new Uint8Array(await response.arrayBuffer()),
                 mimeType: response.headers.get("Content-Type") || contentTypeForName(file.name),
-                downloadUrl: file.download_url
+                downloadUrl: file.download_url,
+                comment: await getComment(file.name)
             };
         }
 
@@ -777,12 +935,35 @@
                 setStatus(`保存中: images/${fileName}`);
                 const bytes = new Uint8Array(await file.arrayBuffer());
                 await uploadImage(fileName, bytes);
+                await setComment(fileName, commentInput.value);
                 const image = await getImage(fileName);
                 if (image) {
                     showPreview(image);
                 }
                 await refreshImageList();
                 setStatus(`保存しました: images/${fileName}`);
+            } catch (error) {
+                setStatus(error.message);
+            } finally {
+                setBusy(false);
+            }
+        });
+
+        commentButton.addEventListener("click", async () => {
+            if (!currentImage) {
+                return;
+            }
+
+            try {
+                ensureGitHubSession();
+                setBusy(true);
+                setStatus(`コメント保存中: images/${currentImage.name}`);
+                await setComment(currentImage.name, commentInput.value);
+                const image = await getImage(currentImage.name);
+                if (image) {
+                    showPreview(image);
+                }
+                setStatus(`コメントを保存しました: images/${currentImage.name}`);
             } catch (error) {
                 setStatus(error.message);
             } finally {
@@ -847,6 +1028,7 @@
                 }
                 await putImage(nextName, currentImage.bytes, existing ? existing.sha : null, `Rename ${currentImage.name} to ${nextName}`);
                 await deleteImage(currentImage.name, currentImage.sha, `Remove ${currentImage.name} after rename`);
+                await moveComment(currentImage.name, nextName);
                 const renamed = await getImage(nextName);
                 if (renamed) {
                     modelInput.value = nextName.replace(/\.[^.]+$/, "");
@@ -874,6 +1056,7 @@
                 setBusy(true);
                 setStatus(`削除中: images/${currentImage.name}`);
                 await deleteImage(currentImage.name, currentImage.sha);
+                await deleteComment(currentImage.name);
                 clearPreview();
                 await refreshImageList();
                 setStatus("画像データを削除しました。");

@@ -21,6 +21,8 @@ GitHub Pagesでは `index.html` をそのまま公開できます。
 
 GitHub Personal Access Tokenには、対象リポジトリの `Contents: Read and write` 権限を付けてください。
 
+管理者画面では画像ごとにコメントも登録できます。コメントはリポジトリ直下の `comments.json` に保存され、検索ページで画像と一緒に表示されます。
+
 ## ローカルDB版を使う場合
 
 ```powershell

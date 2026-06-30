@@ -152,6 +152,20 @@
             object-fit: contain;
         }
 
+        .imageComment {
+            margin: 0;
+            padding: 16px 18px 18px;
+            border-top: 1px solid #dce3ea;
+            color: #17212b;
+            line-height: 1.7;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        .imageComment:empty {
+            display: none;
+        }
+
         .emptyState {
             padding: 42px 24px;
             text-align: center;
@@ -225,6 +239,7 @@
             <div class="imageFrame">
                 <img id="resultImage" src="" alt="">
             </div>
+            <p class="imageComment" id="resultComment"></p>
         </section>
 
         <section class="emptyState" id="message">
@@ -241,6 +256,7 @@
         const result = document.getElementById("result");
         const resultTitle = document.getElementById("resultTitle");
         const resultImage = document.getElementById("resultImage");
+        const resultComment = document.getElementById("resultComment");
         const message = document.getElementById("message");
         const messageModel = document.getElementById("messageModel");
         const messageTitle = document.getElementById("messageTitle");
@@ -260,6 +276,27 @@
             }));
         }
 
+        async function loadComments() {
+            try {
+                const response = await fetch(`comments.json?v=${Date.now()}`);
+                if (!response.ok) {
+                    return {};
+                }
+                const body = await response.json();
+                return body && typeof body === "object" ? body : {};
+            } catch (error) {
+                return {};
+            }
+        }
+
+        function readComment(comments, fileName) {
+            const value = comments[`images/${fileName}`] ?? comments[fileName] ?? "";
+            if (typeof value === "string") {
+                return value;
+            }
+            return value && typeof value.comment === "string" ? value.comment : "";
+        }
+
         function showMessage(title, text, searchedModel = "") {
             result.classList.remove("isVisible");
             message.classList.remove("isHidden");
@@ -268,16 +305,17 @@
             messageText.textContent = text;
         }
 
-        function showImage(candidate) {
+        function showImage(candidate, comments) {
             resultTitle.textContent = candidate.name;
             resultImage.alt = candidate.name;
             resultImage.src = candidate.url;
+            resultComment.textContent = readComment(comments, candidate.name);
             message.classList.add("isHidden");
             result.classList.add("isVisible");
             modelInput.value = "";
         }
 
-        function tryLoad(candidates, searchedModel, index = 0) {
+        function tryLoad(candidates, searchedModel, comments, index = 0) {
             if (index >= candidates.length) {
                 showMessage(
                     "該当する画像がありません",
@@ -290,12 +328,12 @@
 
             const candidate = candidates[index];
             const probe = new Image();
-            probe.onload = () => showImage(candidate);
-            probe.onerror = () => tryLoad(candidates, searchedModel, index + 1);
+            probe.onload = () => showImage(candidate, comments);
+            probe.onerror = () => tryLoad(candidates, searchedModel, comments, index + 1);
             probe.src = `${candidate.url}?v=${Date.now()}`;
         }
 
-        function search(modelNo) {
+        async function search(modelNo) {
             const trimmed = modelNo.trim();
             if (!trimmed) {
                 showMessage("型番を入力すると、登録済み画像を表示します", "画像ファイルは images フォルダに配置してください。");
@@ -305,7 +343,8 @@
             const params = new URLSearchParams(window.location.search);
             params.set("model", trimmed);
             window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
-            tryLoad(buildCandidates(trimmed), trimmed);
+            const comments = await loadComments();
+            tryLoad(buildCandidates(trimmed), trimmed, comments);
         }
 
         form.addEventListener("submit", (event) => {
