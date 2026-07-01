@@ -24,12 +24,12 @@
       ],
       "images": [
         {
-          "file": "1960GHDV-2USB-A/1960GHDV-2USB-A_1.jpg",
-          "comment": "SOCR付き、USBケーブル同梱"
-        },
-        {
           "file": "1960GHDV-2USB-A/1960GHDV-2USB-A_2.jpg",
           "comment": ""
+        },
+        {
+          "file": "1960GHDV-2USB-A/1960GHDV-2USB-A_1.jpg",
+          "comment": "SOCR付き、USBケーブル同梱\nテスト"
         }
       ]
     }
