@@ -122,10 +122,6 @@
         }
 
         .resultHeader {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 16px;
             padding: 18px;
             border-bottom: 1px solid #dce3ea;
         }
@@ -135,6 +131,20 @@
             align-items: baseline;
             flex-wrap: wrap;
             gap: 10px 14px;
+        }
+
+        .imageGrid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 14px;
+            padding: 18px;
+        }
+
+        .imageItem {
+            overflow: hidden;
+            border: 1px solid #dce3ea;
+            border-radius: 8px;
+            background: #ffffff;
         }
 
         .imageFrame {
@@ -152,6 +162,11 @@
             background-size: 20px 20px;
         }
 
+        .imageItem .imageFrame {
+            min-height: 220px;
+            padding: 12px;
+        }
+
         .imageFrame img {
             display: block;
             max-width: 100%;
@@ -161,6 +176,7 @@
 
         .imageComment {
             margin: 0;
+            padding: 12px 14px;
             color: #334455;
             line-height: 1.55;
             white-space: pre-wrap;
@@ -216,6 +232,11 @@
                 min-height: 300px;
                 padding: 12px;
             }
+
+            .imageGrid {
+                grid-template-columns: 1fr;
+                padding: 12px;
+            }
         }
     </style>
 </head>
@@ -227,9 +248,9 @@
         </header>
 
         <form class="searchPanel" id="searchForm">
-            <label for="model">型番</label>
+            <label for="model">型番または4桁登録番号を入力してください</label>
             <div class="searchRow">
-                <input id="model" name="model" placeholder="型番または画像ファイル名" autocomplete="off" autofocus>
+                <input id="model" name="model" placeholder="例: ABC-123 / 1234" autocomplete="off" autofocus>
                 <button type="submit">検索</button>
             </div>
         </form>
@@ -238,22 +259,17 @@
             <div class="resultHeader">
                 <div>
                     <p class="label">検索結果</p>
-                    <div class="resultTitleRow">
-                        <h2 id="resultTitle"></h2>
-                        <p class="imageComment" id="resultComment"></p>
-                    </div>
+                    <h2 id="resultTitle"></h2>
                 </div>
             </div>
-            <div class="imageFrame">
-                <img id="resultImage" src="" alt="">
-            </div>
+            <div class="imageGrid" id="imageGrid"></div>
         </section>
 
-        <section class="emptyState" id="message">
+        <section class="emptyState isHidden" id="message">
             <p class="label">PicScan</p>
             <p class="searchedModel" id="messageModel"></p>
-            <h2 id="messageTitle">型番を入力すると、登録済み画像を表示します</h2>
-            <p id="messageText">画像ファイルは <code>images</code> フォルダに配置してください。</p>
+            <h2 id="messageTitle"></h2>
+            <p id="messageText"></p>
         </section>
     </main>
 
@@ -262,8 +278,7 @@
         const modelInput = document.getElementById("model");
         const result = document.getElementById("result");
         const resultTitle = document.getElementById("resultTitle");
-        const resultImage = document.getElementById("resultImage");
-        const resultComment = document.getElementById("resultComment");
+        const imageGrid = document.getElementById("imageGrid");
         const message = document.getElementById("message");
         const messageModel = document.getElementById("messageModel");
         const messageTitle = document.getElementById("messageTitle");
@@ -296,6 +311,41 @@
             }
         }
 
+        async function loadCatalog() {
+            try {
+                const response = await fetch(`catalog.json?v=${Date.now()}`);
+                if (!response.ok) {
+                    return [];
+                }
+                const body = await response.json();
+                return normalizeCatalog(body);
+            } catch (error) {
+                return [];
+            }
+        }
+
+        function normalizeCatalog(catalog) {
+            const source = Array.isArray(catalog)
+                ? catalog
+                : Array.isArray(catalog?.records)
+                    ? catalog.records
+                    : [];
+            return source
+                .map((record) => ({
+                    name: String(record?.name || "").trim(),
+                    numbers: Array.isArray(record?.numbers)
+                        ? record.numbers.map((number) => String(number).trim()).filter(Boolean)
+                        : [],
+                    images: Array.isArray(record?.images)
+                        ? record.images.slice(0, 6).map((image) => ({
+                            file: String(image?.file || image?.name || "").trim(),
+                            comment: typeof image?.comment === "string" ? image.comment : ""
+                        })).filter((image) => image.file)
+                        : []
+                }))
+                .filter((record) => record.name && record.images.length);
+        }
+
         function readComment(comments, fileName) {
             const value = comments[`images/${fileName}`] ?? comments[fileName] ?? "";
             if (typeof value === "string") {
@@ -307,26 +357,63 @@
         function showMessage(title, text, searchedModel = "") {
             result.classList.remove("isVisible");
             message.classList.remove("isHidden");
-            messageModel.textContent = searchedModel ? `入力型番: ${searchedModel}` : "";
+            messageModel.textContent = searchedModel ? `入力値: ${searchedModel}` : "";
             messageTitle.textContent = title;
             messageText.textContent = text;
         }
 
-        function showImage(candidate, comments) {
-            resultTitle.textContent = candidate.name;
-            resultImage.alt = candidate.name;
-            resultImage.src = candidate.url;
-            resultComment.textContent = readComment(comments, candidate.name);
+        function imageUrl(fileName) {
+            return `images/${encodePathSegment(fileName)}`;
+        }
+
+        function showRecord(record, comments, searchedModel = "") {
+            const numberText = record.numbers.length ? ` (${record.numbers.join(", ")})` : "";
+            resultTitle.textContent = `${record.name}${numberText}`;
+            imageGrid.textContent = "";
+            record.images.slice(0, 6).forEach((image) => {
+                const item = document.createElement("article");
+                item.className = "imageItem";
+
+                const frame = document.createElement("div");
+                frame.className = "imageFrame";
+
+                const img = document.createElement("img");
+                img.alt = `${record.name} ${image.file}`;
+                img.src = imageUrl(image.file);
+
+                const comment = document.createElement("p");
+                comment.className = "imageComment";
+                comment.textContent = image.comment || readComment(comments, image.file);
+
+                frame.appendChild(img);
+                item.appendChild(frame);
+                item.appendChild(comment);
+                imageGrid.appendChild(item);
+            });
             message.classList.add("isHidden");
             result.classList.add("isVisible");
             modelInput.value = "";
+        }
+
+        function findRecord(catalog, query) {
+            const normalized = query.trim().toLowerCase();
+            return catalog.find((record) => record.name.toLowerCase() === normalized)
+                || catalog.find((record) => record.numbers.some((number) => number === query.trim()));
+        }
+
+        function showLegacyImage(candidate, comments) {
+            showRecord({
+                name: candidate.name.replace(/\.[^.]+$/, ""),
+                numbers: [],
+                images: [{ file: candidate.name, comment: readComment(comments, candidate.name) }]
+            }, comments);
         }
 
         function tryLoad(candidates, searchedModel, comments, index = 0) {
             if (index >= candidates.length) {
                 showMessage(
                     "該当する画像がありません",
-                    "入力した型番と同じ名前の画像ファイルが images フォルダにあるか確認してください。",
+                    "型番、4桁登録番号、または同じ名前の画像ファイルが登録されているか確認してください。",
                     searchedModel
                 );
                 modelInput.value = "";
@@ -335,7 +422,7 @@
 
             const candidate = candidates[index];
             const probe = new Image();
-            probe.onload = () => showImage(candidate, comments);
+            probe.onload = () => showLegacyImage(candidate, comments);
             probe.onerror = () => tryLoad(candidates, searchedModel, comments, index + 1);
             probe.src = `${candidate.url}?v=${Date.now()}`;
         }
@@ -343,14 +430,20 @@
         async function search(modelNo) {
             const trimmed = modelNo.trim();
             if (!trimmed) {
-                showMessage("型番を入力すると、登録済み画像を表示します", "画像ファイルは images フォルダに配置してください。");
+                result.classList.remove("isVisible");
+                message.classList.add("isHidden");
                 return;
             }
 
             const params = new URLSearchParams(window.location.search);
             params.set("model", trimmed);
             window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
-            const comments = await loadComments();
+            const [catalog, comments] = await Promise.all([loadCatalog(), loadComments()]);
+            const record = findRecord(catalog, trimmed);
+            if (record) {
+                showRecord(record, comments, trimmed);
+                return;
+            }
             tryLoad(buildCandidates(trimmed), trimmed, comments);
         }
 

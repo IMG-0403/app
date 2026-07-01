@@ -313,12 +313,16 @@
             <p class="label">画像管理</p>
             <div class="grid">
                 <div class="field">
-                    <label for="model">型番</label>
-                    <input id="model" autocomplete="off" placeholder="例: ABC-123">
+                    <label for="model">登録名</label>
+                    <input id="model" autocomplete="off" placeholder="例: 商品A">
+                </div>
+                <div class="field">
+                    <label for="numbers">登録番号4桁</label>
+                    <input id="numbers" autocomplete="off" placeholder="例: 1234, 5678">
                 </div>
                 <div class="field">
                     <label for="photo">画像</label>
-                    <input id="photo" type="file" accept="image/*" capture="environment">
+                    <input id="photo" type="file" accept="image/*" capture="environment" multiple>
                 </div>
                 <div class="field full">
                     <label for="comment">コメント</label>
@@ -326,10 +330,10 @@
                 </div>
             </div>
             <div class="actions">
-                <button id="uploadButton" type="button">画像を保存</button>
+                <button id="uploadButton" type="button">登録を保存</button>
                 <button id="searchButton" class="secondary" type="button">検索</button>
-                <button id="commentButton" class="secondary" type="button" disabled>コメント保存</button>
-                <button id="renameButton" class="secondary" type="button" disabled>名前変更</button>
+                <button id="commentButton" class="secondary hidden" type="button" disabled>コメント保存</button>
+                <button id="renameButton" class="secondary hidden" type="button" disabled>名前変更</button>
                 <button id="deleteButton" class="danger" type="button" disabled>画像データ削除</button>
             </div>
             <div class="previewPanel hidden" id="previewPanel">
@@ -359,6 +363,7 @@
         const repoInput = document.getElementById("repo");
         const tokenInput = document.getElementById("token");
         const modelInput = document.getElementById("model");
+        const numbersInput = document.getElementById("numbers");
         const photoInput = document.getElementById("photo");
         const commentInput = document.getElementById("comment");
         const loginPanel = document.getElementById("loginPanel");
@@ -420,7 +425,9 @@
             resultMeta.textContent = "";
             resultComment.textContent = "";
             resultComment.classList.add("hidden");
+            numbersInput.value = "";
             commentInput.value = "";
+            photoInput.value = "";
             previewPanel.classList.add("hidden");
             updateResultActions();
         }
@@ -440,10 +447,18 @@
                 resultImage.removeAttribute("src");
             }
             resultImage.alt = image.name;
-            resultMeta.textContent = `images/${image.name}`;
+            const recordText = image.recordName ? ` / 登録名: ${image.recordName}` : "";
+            const numberText = image.numbers && image.numbers.length ? ` / 登録番号: ${image.numbers.join(", ")}` : "";
+            resultMeta.textContent = `images/${image.name}${recordText}${numberText}`;
             resultComment.textContent = image.comment || "";
             resultComment.classList.toggle("hidden", !image.comment);
             commentInput.value = image.comment || "";
+            if (image.recordName) {
+                modelInput.value = image.recordName;
+            }
+            if (image.numbers) {
+                numbersInput.value = image.numbers.join(", ");
+            }
             previewPanel.classList.remove("hidden");
             updateResultActions();
         }
@@ -458,6 +473,27 @@
                 return "";
             }
             return /\.[a-z0-9]+$/i.test(clean) ? clean : `${clean}${fallbackExtension}`;
+        }
+
+        function safeFileBase(value) {
+            return normalizeBaseName(value)
+                .replace(/\.[^.]+$/, "")
+                .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+                .trim()
+                || "image";
+        }
+
+        function parseNumbers(value) {
+            return [...new Set(value.split(/[\s,、]+/)
+                .map((number) => number.trim())
+                .filter(Boolean))]
+                .filter((number) => /^\d{4}$/.test(number));
+        }
+
+        function parseNumberTokens(value) {
+            return value.split(/[\s,、]+/)
+                .map((number) => number.trim())
+                .filter(Boolean);
         }
 
         function modelCandidates(value) {
@@ -579,6 +615,120 @@
                 },
                 body: JSON.stringify(payload)
             });
+        }
+
+        async function loadCatalogFile() {
+            const response = await fetch(repoContentUrl("catalog.json"), {
+                headers: githubHeaders()
+            });
+            if (response.status === 404) {
+                return { sha: null, catalog: { records: [] } };
+            }
+            const body = await response.json();
+            if (!response.ok) {
+                throw new Error(`GitHub API error ${response.status}: ${body.message || "request failed"}`);
+            }
+
+            let catalog = { records: [] };
+            try {
+                catalog = JSON.parse(decodeBase64Text(body.content));
+            } catch (error) {
+                catalog = { records: [] };
+            }
+            return { sha: body.sha, catalog: normalizeCatalog(catalog) };
+        }
+
+        function normalizeCatalog(catalog) {
+            const records = Array.isArray(catalog)
+                ? catalog
+                : Array.isArray(catalog && catalog.records)
+                    ? catalog.records
+                    : [];
+            return {
+                records: records.map((record) => ({
+                    name: String(record && record.name || "").trim(),
+                    numbers: Array.isArray(record && record.numbers)
+                        ? record.numbers.map((number) => String(number).trim()).filter((number) => /^\d{4}$/.test(number))
+                        : [],
+                    images: Array.isArray(record && record.images)
+                        ? record.images.slice(0, 6).map((image) => ({
+                            file: String(image && (image.file || image.name) || "").trim(),
+                            comment: typeof (image && image.comment) === "string" ? image.comment : ""
+                        })).filter((image) => image.file)
+                        : []
+                })).filter((record) => record.name)
+            };
+        }
+
+        async function saveCatalogFile(catalog, sha) {
+            const payload = {
+                message: "Update image catalog",
+                branch: session.branch,
+                content: encodeBase64Text(`${JSON.stringify(normalizeCatalog(catalog), null, 2)}\n`)
+            };
+            if (sha) {
+                payload.sha = sha;
+            }
+            await githubRequest(repoContentUrl("catalog.json", false), {
+                method: "PUT",
+                headers: {
+                    ...githubHeaders(),
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
+            });
+        }
+
+        function findCatalogRecord(catalog, value) {
+            const query = value.trim();
+            const normalized = query.toLowerCase();
+            return catalog.records.find((record) => record.name.toLowerCase() === normalized)
+                || catalog.records.find((record) => record.numbers.includes(query));
+        }
+
+        function findRecordByImage(catalog, fileName) {
+            return catalog.records.find((record) => record.images.some((image) => image.file === fileName));
+        }
+
+        function findRecordIndexByImage(catalog, fileName) {
+            return catalog.records.findIndex((record) => record.images.some((image) => image.file === fileName));
+        }
+
+        function findRecordByName(catalog, name) {
+            const normalized = name.trim().toLowerCase();
+            return catalog.records.find((record) => record.name.toLowerCase() === normalized);
+        }
+
+        function findOtherRecordByName(catalog, name, currentRecord) {
+            const normalized = name.trim().toLowerCase();
+            return catalog.records.find((record) => record !== currentRecord && record.name.toLowerCase() === normalized);
+        }
+
+        function nextCatalogFileName(recordName, existingImages, originalFileName) {
+            const extension = originalFileName.match(/\.[a-z0-9]+$/i)?.[0] || ".jpg";
+            const base = safeFileBase(recordName);
+            for (let index = 1; index <= 6; index += 1) {
+                const candidate = `${base}_${index}${extension}`;
+                if (!existingImages.some((image) => image.file === candidate)) {
+                    return candidate;
+                }
+            }
+            return "";
+        }
+
+        async function attachCatalogToImage(image) {
+            const { catalog } = await loadCatalogFile();
+            const record = findRecordByImage(catalog, image.name);
+            if (!record) {
+                return image;
+            }
+            const item = record.images.find((entry) => entry.file === image.name);
+            return {
+                ...image,
+                recordName: record.name,
+                numbers: record.numbers,
+                comment: item && item.comment ? item.comment : image.comment
+            };
         }
 
         function commentKey(fileName) {
@@ -705,7 +855,8 @@
                     await refreshImageList();
                     return;
                 }
-                modelInput.value = file.name.replace(/\.[^.]+$/, "");
+                image = await attachCatalogToImage(image);
+                modelInput.value = image.recordName || file.name.replace(/\.[^.]+$/, "");
                 showPreview(image);
                 setStatus(`選択しました: images/${image.name}`);
             } catch (error) {
@@ -726,6 +877,13 @@
                 setStatus(`削除中: images/${file.name}`);
                 await deleteImage(file.name, file.sha);
                 await deleteComment(file.name);
+                const { sha, catalog } = await loadCatalogFile();
+                const record = findRecordByImage(catalog, file.name);
+                if (record) {
+                    record.images = record.images.filter((image) => image.file !== file.name);
+                    catalog.records = catalog.records.filter((item) => item.images.length > 0 || item.name !== record.name);
+                    await saveCatalogFile(catalog, sha);
+                }
                 if (currentImage && currentImage.name === file.name) {
                     clearPreview();
                 }
@@ -795,11 +953,26 @@
         }
 
         async function findImage(value) {
+            const { catalog } = await loadCatalogFile();
+            const record = findCatalogRecord(catalog, value);
+            if (record && record.images.length) {
+                const first = record.images[0];
+                const image = await getImage(first.file);
+                if (image) {
+                    return {
+                        ...image,
+                        recordName: record.name,
+                        numbers: record.numbers,
+                        comment: first.comment || image.comment
+                    };
+                }
+            }
+
             const candidates = modelCandidates(value);
             for (const candidate of candidates) {
                 const image = await getImage(candidate);
                 if (image) {
-                    return image;
+                    return attachCatalogToImage(image);
                 }
             }
 
@@ -813,7 +986,7 @@
                 const baseName = file.name.replace(/\.[^.]+$/, "");
                 return baseName.toLowerCase() === clean.toLowerCase();
             });
-            return matched ? getImage(matched.name) : null;
+            return matched ? attachCatalogToImage(await getImage(matched.name)) : null;
         }
 
         function contentTypeForName(fileName) {
@@ -916,32 +1089,124 @@
         });
 
         uploadButton.addEventListener("click", async () => {
-            const modelNo = modelInput.value.trim();
-            const file = photoInput.files[0];
-            if (!modelNo) {
-                setStatus("型番を入力してください。");
+            const recordName = modelInput.value.trim();
+            const numberTokens = parseNumberTokens(numbersInput.value);
+            const numbers = parseNumbers(numbersInput.value);
+            const files = Array.from(photoInput.files);
+            if (!recordName) {
+                setStatus("登録名を入力してください。");
                 return;
             }
-            if (!file) {
+            if (!currentImage && !files.length) {
                 setStatus("画像ファイルを選択してください。");
                 return;
             }
+            if (numberTokens.some((number) => !/^\d{4}$/.test(number))) {
+                setStatus("登録番号は4桁数字で入力してください。");
+                return;
+            }
 
-            const extension = file.name.match(/\.[a-z0-9]+$/i)?.[0] || ".jpg";
-            const fileName = normalizeFileName(modelNo, extension);
             try {
                 ensureGitHubSession();
                 setBusy(true);
-                setStatus(`保存中: images/${fileName}`);
-                const bytes = new Uint8Array(await file.arrayBuffer());
-                await uploadImage(fileName, bytes);
-                await setComment(fileName, commentInput.value);
-                const image = await getImage(fileName);
+                const { sha, catalog } = await loadCatalogFile();
+                const comment = commentInput.value.trim();
+                let record = null;
+                let previewFileName = "";
+
+                if (currentImage) {
+                    const recordIndex = findRecordIndexByImage(catalog, currentImage.name);
+                    if (recordIndex >= 0) {
+                        record = catalog.records[recordIndex];
+                    } else {
+                        record = {
+                            name: currentImage.recordName || recordName,
+                            numbers: Array.isArray(currentImage.numbers) ? currentImage.numbers : [],
+                            images: [{ file: currentImage.name, comment: currentImage.comment || "" }]
+                        };
+                        catalog.records.push(record);
+                    }
+
+                    const duplicateRecord = findOtherRecordByName(catalog, recordName, record);
+                    if (duplicateRecord) {
+                        setStatus("同じ登録名が既にあります。別の登録名を入力してください。");
+                        return;
+                    }
+
+                    record.name = recordName;
+                    record.numbers = numbers;
+
+                    let imageEntry = record.images.find((image) => image.file === currentImage.name);
+                    if (!imageEntry) {
+                        imageEntry = { file: currentImage.name, comment: "" };
+                        record.images.unshift(imageEntry);
+                    }
+                    imageEntry.comment = comment;
+                    await setComment(imageEntry.file, comment);
+                    previewFileName = imageEntry.file;
+
+                    if (files.length) {
+                        const firstFile = files[0];
+                        const replacementBytes = new Uint8Array(await firstFile.arrayBuffer());
+                        await putImage(imageEntry.file, replacementBytes, currentImage.sha, `Update ${imageEntry.file}`);
+                    }
+
+                    const appendFiles = files.slice(1);
+                    const remaining = 6 - record.images.length;
+                    if (appendFiles.length > remaining) {
+                        setStatus(`最大6枚までです。追加画像は先頭${Math.max(remaining, 0)}枚だけ保存します。`);
+                    }
+                    for (const file of appendFiles.slice(0, Math.max(remaining, 0))) {
+                        const fileName = nextCatalogFileName(record.name, record.images, file.name);
+                        if (!fileName) {
+                            break;
+                        }
+                        const bytes = new Uint8Array(await file.arrayBuffer());
+                        await uploadImage(fileName, bytes);
+                        await setComment(fileName, comment);
+                        record.images.push({ file: fileName, comment });
+                    }
+                } else {
+                    record = findRecordByName(catalog, recordName);
+                    if (!record) {
+                        record = { name: recordName, numbers: [], images: [] };
+                        catalog.records.push(record);
+                    }
+                    record.numbers = numbers.length ? numbers : record.numbers;
+
+                    const remaining = 6 - record.images.length;
+                    if (remaining <= 0) {
+                        setStatus("この登録名には既に6枚の画像が登録されています。");
+                        return;
+                    }
+                    if (files.length > remaining) {
+                        setStatus(`最大6枚までです。先頭${remaining}枚だけ保存します。`);
+                    } else {
+                        setStatus(`保存中: ${recordName}`);
+                    }
+                    for (const file of files.slice(0, remaining)) {
+                        const fileName = nextCatalogFileName(record.name, record.images, file.name);
+                        if (!fileName) {
+                            break;
+                        }
+                        const bytes = new Uint8Array(await file.arrayBuffer());
+                        await uploadImage(fileName, bytes);
+                        await setComment(fileName, comment);
+                        record.images.push({ file: fileName, comment });
+                        if (!previewFileName) {
+                            previewFileName = fileName;
+                        }
+                    }
+                }
+
+                await saveCatalogFile(catalog, sha);
+                const image = previewFileName ? await getImage(previewFileName) : null;
                 if (image) {
-                    showPreview(image);
+                    showPreview(await attachCatalogToImage(image));
                 }
                 await refreshImageList();
-                setStatus(`保存しました: images/${fileName}`);
+                photoInput.value = "";
+                setStatus(`保存しました: ${record.name} (${record.images.length}/6枚)`);
             } catch (error) {
                 setStatus(error.message);
             } finally {
@@ -959,9 +1224,18 @@
                 setBusy(true);
                 setStatus(`コメント保存中: images/${currentImage.name}`);
                 await setComment(currentImage.name, commentInput.value);
+                const { sha, catalog } = await loadCatalogFile();
+                const record = findRecordByImage(catalog, currentImage.name);
+                if (record) {
+                    const imageEntry = record.images.find((image) => image.file === currentImage.name);
+                    if (imageEntry) {
+                        imageEntry.comment = commentInput.value.trim();
+                        await saveCatalogFile(catalog, sha);
+                    }
+                }
                 const image = await getImage(currentImage.name);
                 if (image) {
-                    showPreview(image);
+                    showPreview(await attachCatalogToImage(image));
                 }
                 setStatus(`コメントを保存しました: images/${currentImage.name}`);
             } catch (error) {
@@ -974,7 +1248,7 @@
         searchButton.addEventListener("click", async () => {
             const modelNo = modelInput.value.trim();
             if (!modelNo) {
-                setStatus("型番を入力してください。");
+                setStatus("登録名または4桁登録番号を入力してください。");
                 return;
             }
 
@@ -1002,14 +1276,14 @@
                 return;
             }
 
-            const nextValue = prompt("変更後の型番を入力してください。", currentImage.name.replace(/\.[^.]+$/, ""));
+            const nextValue = prompt("変更後の画像ファイル名を入力してください。", currentImage.name.replace(/\.[^.]+$/, ""));
             if (nextValue === null) {
                 return;
             }
             const extension = currentImage.name.match(/\.[a-z0-9]+$/i)?.[0] || ".jpg";
             const nextName = normalizeFileName(nextValue, extension);
             if (!nextName) {
-                setStatus("変更後の型番を入力してください。");
+                setStatus("変更後の画像ファイル名を入力してください。");
                 return;
             }
             if (nextName === currentImage.name) {
@@ -1029,10 +1303,19 @@
                 await putImage(nextName, currentImage.bytes, existing ? existing.sha : null, `Rename ${currentImage.name} to ${nextName}`);
                 await deleteImage(currentImage.name, currentImage.sha, `Remove ${currentImage.name} after rename`);
                 await moveComment(currentImage.name, nextName);
+                const { sha, catalog } = await loadCatalogFile();
+                const record = findRecordByImage(catalog, currentImage.name);
+                if (record) {
+                    const imageEntry = record.images.find((image) => image.file === currentImage.name);
+                    if (imageEntry) {
+                        imageEntry.file = nextName;
+                        await saveCatalogFile(catalog, sha);
+                    }
+                }
                 const renamed = await getImage(nextName);
                 if (renamed) {
                     modelInput.value = nextName.replace(/\.[^.]+$/, "");
-                    showPreview(renamed);
+                    showPreview(await attachCatalogToImage(renamed));
                 }
                 await refreshImageList();
                 setStatus(`名前変更しました: images/${nextName}`);
@@ -1057,6 +1340,13 @@
                 setStatus(`削除中: images/${currentImage.name}`);
                 await deleteImage(currentImage.name, currentImage.sha);
                 await deleteComment(currentImage.name);
+                const { sha, catalog } = await loadCatalogFile();
+                const record = findRecordByImage(catalog, currentImage.name);
+                if (record) {
+                    record.images = record.images.filter((image) => image.file !== currentImage.name);
+                    catalog.records = catalog.records.filter((item) => item.images.length > 0 || item.name !== record.name);
+                    await saveCatalogFile(catalog, sha);
+                }
                 clearPreview();
                 await refreshImageList();
                 setStatus("画像データを削除しました。");
