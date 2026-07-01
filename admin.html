@@ -1224,17 +1224,29 @@
             if (!response.ok) {
                 throw new Error(`GitHub API error ${response.status}: ${body.message || "request failed"}`);
             }
-            const binary = atob(body.content.replace(/\n/g, ""));
-            const bytes = new Uint8Array(binary.length);
-            for (let index = 0; index < binary.length; index += 1) {
-                bytes[index] = binary.charCodeAt(index);
+            let bytes = null;
+            if (typeof body.content === "string" && body.content) {
+                const binary = atob(body.content.replace(/\n/g, ""));
+                bytes = new Uint8Array(binary.length);
+                for (let index = 0; index < binary.length; index += 1) {
+                    bytes[index] = binary.charCodeAt(index);
+                }
+            } else if (body.download_url) {
+                const imageResponse = await fetch(body.download_url, {
+                    headers: {
+                        "Authorization": `Bearer ${session.token}`
+                    }
+                });
+                if (imageResponse.ok) {
+                    bytes = new Uint8Array(await imageResponse.arrayBuffer());
+                }
             }
-            const comment = await getComment(body.name);
+            const comment = await getComment(fileName);
             return {
-                name: body.name,
+                name: fileName,
                 sha: body.sha,
                 bytes,
-                mimeType: contentTypeForName(body.name),
+                mimeType: contentTypeForName(fileName),
                 downloadUrl: body.download_url,
                 comment
             };
