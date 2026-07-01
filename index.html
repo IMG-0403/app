@@ -122,25 +122,27 @@
         }
 
         .resultHeader {
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
+            display: grid;
+            grid-template-columns: minmax(180px, 0.8fr) minmax(260px, 1.2fr) minmax(120px, 0.6fr);
+            align-items: start;
             gap: 18px;
             padding: 18px;
             border-bottom: 1px solid #dce3ea;
         }
 
+        .resultCommentBlock {
+            grid-column: 2;
+        }
+
         .resultComment {
-            max-width: min(54ch, 52%);
             margin: 0;
             color: #334455;
             line-height: 1.55;
             white-space: pre-wrap;
             overflow-wrap: anywhere;
-            text-align: right;
         }
 
-        .resultComment.isHidden {
+        .resultCommentBlock.isHidden {
             display: none;
         }
 
@@ -336,10 +338,8 @@
                 display: block;
             }
 
-            .resultComment {
-                max-width: none;
+            .resultCommentBlock {
                 margin-top: 10px;
-                text-align: left;
             }
         }
     </style>
@@ -365,7 +365,10 @@
                     <p class="label">検索結果</p>
                     <h2 id="resultTitle"></h2>
                 </div>
-                <p class="resultComment isHidden" id="resultComment"></p>
+                <div class="resultCommentBlock isHidden" id="resultCommentBlock">
+                    <p class="label">コメント</p>
+                    <p class="resultComment" id="resultComment"></p>
+                </div>
             </div>
             <div class="imageGrid" id="imageGrid"></div>
         </section>
@@ -396,6 +399,7 @@
         const modelInput = document.getElementById("model");
         const result = document.getElementById("result");
         const resultTitle = document.getElementById("resultTitle");
+        const resultCommentBlock = document.getElementById("resultCommentBlock");
         const resultComment = document.getElementById("resultComment");
         const imageGrid = document.getElementById("imageGrid");
         const message = document.getElementById("message");
@@ -526,7 +530,7 @@
                 .map((comment) => comment.trim())
                 .filter(Boolean))];
             resultComment.textContent = recordComments.join("\n");
-            resultComment.classList.toggle("isHidden", !recordComments.length);
+            resultCommentBlock.classList.toggle("isHidden", !recordComments.length);
             imageGrid.textContent = "";
             record.images.slice(0, 6).forEach((image) => {
                 const item = document.createElement("article");
