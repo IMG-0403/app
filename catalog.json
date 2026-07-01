@@ -8,11 +8,21 @@
       ],
       "images": [
         {
-          "file": "CT37-X0N-57S10DG/CT37-X0N-57S10DG_1.jpg",
+          "file": "CT37-X0N-57S10DG\/CT37-X0N-57S10DG_1.jpg",
           "comment": ""
         },
         {
-          "file": "CT37-X0N-57S10DG/CT37-X0N-57S10DG_3.jpg",
+          "file": "CT37-X0N-57S10DG\/CT37-X0N-57S10DG_3.jpg",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "name": "1960GHDV-2USB-A",
+      "numbers": [],
+      "images": [
+        {
+          "file": "1960GHDV-2USB-A\/1960GHDV-2USB-A_1.jpg",
           "comment": ""
         }
       ]
