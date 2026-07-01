@@ -548,6 +548,7 @@
         let session = null;
         let currentImage = null;
         let currentObjectUrl = "";
+        let recordImageClickTimer = null;
 
         ownerInput.value = localStorage.getItem("picscanOwner") || "img-0403";
         repoInput.value = localStorage.getItem("picscanRepo") || "PicScan";
@@ -572,7 +573,7 @@
             const hasImage = Boolean(currentImage);
             commentButton.disabled = !hasImage;
             renameButton.disabled = !hasImage || !currentImage.bytes;
-            deleteButton.disabled = !hasImage || !currentImage.sha;
+            deleteButton.disabled = !hasImage;
         }
 
         function clearPreview() {
@@ -610,6 +611,45 @@
             return `images/${encodePathSegment(normalizeImageFilePath(fileName))}`;
         }
 
+        function recordImageFileCandidates(recordName, fileName) {
+            const normalized = normalizeImageFilePath(fileName);
+            const candidates = [];
+            const addCandidate = (candidate) => {
+                const clean = normalizeImageFilePath(candidate);
+                if (clean && !candidates.includes(clean)) {
+                    candidates.push(clean);
+                }
+            };
+
+            addCandidate(normalized);
+            const leafName = normalized.split("/").pop();
+            const base = safeFileBase(recordName || "");
+            if (base && leafName && !normalized.includes("/")) {
+                addCandidate(`${base}/${leafName}`);
+            }
+            return candidates;
+        }
+
+        function recordImageUrls(recordName, fileName) {
+            return recordImageFileCandidates(recordName, fileName).map(imageUrl);
+        }
+
+        function recordImageMatches(recordName, fileName, targetFileName) {
+            const target = normalizeImageFilePath(targetFileName);
+            return recordImageFileCandidates(recordName, fileName).includes(target);
+        }
+
+        function setImageWithFallback(img, urls) {
+            let urlIndex = 0;
+            img.onerror = () => {
+                urlIndex += 1;
+                if (urlIndex < urls.length) {
+                    img.src = urls[urlIndex];
+                }
+            };
+            img.src = urls[0] || "";
+        }
+
         function openLightbox(title, src, comment) {
             lightboxTitle.textContent = title;
             lightboxImage.src = src;
@@ -630,10 +670,13 @@
                 : [{ file: image.name, comment: image.comment || "" }];
             image.recordImages = images;
             recordImageGrid.textContent = "";
+            const currentName = normalizeImageFilePath(image.name);
             images.slice(0, 6).forEach((entry, index) => {
                 const item = document.createElement("article");
                 item.className = "recordImageItem";
-                if (entry.file === image.name) {
+                const recordName = image.recordName || "";
+                const entryFile = normalizeImageFilePath(entry.file);
+                if (recordImageMatches(recordName, entryFile, currentName)) {
                     item.classList.add("isSelected");
                 }
 
@@ -645,9 +688,11 @@
                 frame.className = "recordImageFrame";
 
                 const img = document.createElement("img");
-                const src = entry.file === image.name && currentObjectUrl ? currentObjectUrl : imageUrl(entry.file);
-                img.src = src;
-                img.alt = `${image.recordName || image.name} ${entry.file}`;
+                const urls = entryFile === currentName && currentObjectUrl
+                    ? [currentObjectUrl, ...recordImageUrls(recordName, entryFile)]
+                    : recordImageUrls(recordName, entryFile);
+                setImageWithFallback(img, urls);
+                img.alt = `${recordName || image.name} ${entryFile}`;
 
                 const caption = document.createElement("p");
                 caption.className = "recordImageCaption";
@@ -655,7 +700,14 @@
 
                 frame.appendChild(img);
                 button.appendChild(frame);
-                button.addEventListener("click", () => openLightbox(img.alt, src, caption.textContent));
+                button.addEventListener("click", () => {
+                    clearTimeout(recordImageClickTimer);
+                    recordImageClickTimer = setTimeout(() => selectRecordImage(image, entry), 220);
+                });
+                button.addEventListener("dblclick", () => {
+                    clearTimeout(recordImageClickTimer);
+                    openLightbox(img.alt, img.currentSrc || img.src, caption.textContent);
+                });
                 item.appendChild(button);
                 item.appendChild(caption);
 
@@ -679,6 +731,39 @@
                 item.appendChild(actions);
                 recordImageGrid.appendChild(item);
             });
+        }
+
+        async function selectRecordImage(recordImage, entry) {
+            const record = {
+                name: recordImage.recordName || modelInput.value.trim() || recordImage.name,
+                numbers: Array.isArray(recordImage.numbers) ? recordImage.numbers : [],
+                images: Array.isArray(recordImage.recordImages) ? recordImage.recordImages : []
+            };
+            let selected = null;
+            try {
+                selected = await getRecordImage(record, entry);
+            } catch (error) {
+                selected = null;
+            }
+            if (!selected) {
+                const fallbackFile = recordImageFileCandidates(record.name, entry.file)[0] || normalizeImageFilePath(entry.file);
+                selected = {
+                    name: fallbackFile,
+                    sha: "",
+                    bytes: null,
+                    mimeType: contentTypeForName(fallbackFile),
+                    downloadUrl: imageUrl(fallbackFile),
+                    comment: entry.comment || ""
+                };
+            }
+            showPreview({
+                ...selected,
+                recordName: record.name,
+                numbers: record.numbers,
+                recordImages: record.images,
+                comment: typeof entry.comment === "string" ? entry.comment : selected.comment
+            });
+            setStatus(`選択しました: images/${selected.name}`);
         }
 
         function moveRecordImage(index, direction) {
@@ -987,12 +1072,12 @@
 
         function findRecordByImage(catalog, fileName) {
             const normalized = normalizeImageFilePath(fileName);
-            return catalog.records.find((record) => record.images.some((image) => image.file === normalized));
+            return catalog.records.find((record) => record.images.some((image) => recordImageMatches(record.name, image.file, normalized)));
         }
 
         function findRecordIndexByImage(catalog, fileName) {
             const normalized = normalizeImageFilePath(fileName);
-            return catalog.records.findIndex((record) => record.images.some((image) => image.file === normalized));
+            return catalog.records.findIndex((record) => record.images.some((image) => recordImageMatches(record.name, image.file, normalized)));
         }
 
         function findRecordByName(catalog, name) {
@@ -1149,6 +1234,16 @@
             setStatus(`登録画像一覧を表示しました: ${records.length}件`);
         }
 
+        async function getRecordImage(record, imageEntry) {
+            for (const candidate of recordImageFileCandidates(record.name, imageEntry.file)) {
+                const image = await getImage(candidate);
+                if (image) {
+                    return image;
+                }
+            }
+            return null;
+        }
+
         async function selectListedRecord(record) {
             try {
                 ensureGitHubSession();
@@ -1162,17 +1257,18 @@
                 setStatus(`読み込み中: ${record.name}`);
                 let image = null;
                 try {
-                    image = await getImage(first.file);
+                    image = await getRecordImage(record, first);
                 } catch (error) {
                     image = null;
                 }
                 if (!image) {
+                    const fallbackFile = recordImageFileCandidates(record.name, first.file)[0] || normalizeImageFilePath(first.file);
                     image = {
-                        name: normalizeImageFilePath(first.file),
+                        name: fallbackFile,
                         sha: "",
                         bytes: null,
                         mimeType: contentTypeForName(first.file),
-                        downloadUrl: imageUrl(first.file),
+                        downloadUrl: imageUrl(fallbackFile),
                         comment: first.comment || ""
                     };
                 }
@@ -1702,18 +1798,43 @@
                 ensureGitHubSession();
                 setBusy(true);
                 setStatus(`削除中: images/${currentImage.name}`);
-                await deleteImage(currentImage.name, currentImage.sha);
+                let imageForDelete = currentImage;
+                if (!imageForDelete.sha) {
+                    imageForDelete = await getImage(currentImage.name);
+                }
+                if (!imageForDelete || !imageForDelete.sha) {
+                    setStatus("削除対象の画像データが見つかりませんでした。");
+                    return;
+                }
+                await deleteImage(imageForDelete.name, imageForDelete.sha);
                 await deleteComment(currentImage.name);
                 const { sha, catalog } = await loadCatalogFile();
+                let nextRecord = null;
+                let nextEntry = null;
                 const record = findRecordByImage(catalog, currentImage.name);
                 if (record) {
-                    record.images = record.images.filter((image) => image.file !== currentImage.name);
+                    const removedIndex = record.images.findIndex((image) => recordImageMatches(record.name, image.file, currentImage.name));
+                    record.images = record.images.filter((image) => !recordImageMatches(record.name, image.file, currentImage.name));
                     catalog.records = catalog.records.filter((item) => item.images.length > 0 || item.name !== record.name);
+                    if (record.images.length) {
+                        nextRecord = record;
+                        nextEntry = record.images[Math.min(Math.max(removedIndex, 0), record.images.length - 1)];
+                    }
                     await saveCatalogFile(catalog, sha);
                 }
-                clearPreview();
+                if (nextRecord && nextEntry) {
+                    await selectRecordImage({
+                        name: nextEntry.file,
+                        recordName: nextRecord.name,
+                        numbers: nextRecord.numbers,
+                        recordImages: nextRecord.images,
+                        comment: nextEntry.comment || ""
+                    }, nextEntry);
+                } else {
+                    clearPreview();
+                }
                 await refreshImageList();
-                setStatus("画像データを削除しました。");
+                setStatus("選択中の画像データを削除しました。");
             } catch (error) {
                 setStatus(error.message);
             } finally {
